@@ -2,165 +2,111 @@ import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 from sklearn.linear_model import LinearRegression, HuberRegressor
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.preprocessing import RobustScaler
+from sklearn.decomposition import PCA
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
 import pandas as pd
 
 # ─── Cấu hình trang ────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Linear vs Huber Regression", layout="wide")
 
-# Ẩn menu & footer
+# Ẩn menu & footer và thêm CSS để tăng kích thước container biểu đồ
 st.markdown(
     """
     <style>
         #MainMenu {visibility: hidden;}
         footer    {visibility: hidden;}
+        .plotly-chart-container {
+            width: 100% !important;
+            max-width: 1200px !important;
+            margin: auto;
+        }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# ─── Phần 1: 3D Visualization (GaltonFamilies Dataset with Outliers) ───────────
+# ─── Phần 1: Chuẩn bị dữ liệu GaltonFamilies ───────────────────────────────────
 
 # Tải dataset GaltonFamilies
 galton = pd.read_csv("family.csv")
 
-# Trích xuất features và target
-X = galton[['father', 'mother']].values
+# Mã hóa gender (male=1, female=0)
+galton['gender'] = galton['gender'].map({'male': 1, 'female': 0})
+
+# Chọn các thuộc tính để huấn luyện (loại bỏ 'family' và 'midparentHeight')
+features = ['father', 'mother', 'children', 'childNum', 'gender']
+X = galton[features].values
 y = galton['childHeight'].values
 
-# Thêm outliers nhân tạo để làm nổi bật sự khác biệt
+# Tách tập train và test (80% train, 20% test)
 np.random.seed(42)
-outlier_indices = np.random.choice(len(y), 0, replace=False)  # Không thêm outliers
-y_with_outliers = y.copy()
-# y_with_outliers[outlier_indices] += np.random.uniform(-200, -180, 0)  # Không thêm outliers
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Chuẩn hóa dữ liệu
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+# Chuẩn hóa dữ liệu với RobustScaler
+scaler = RobustScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
 
-# Huấn luyện Linear Regression
-lr = LinearRegression()
-lr.fit(X_scaled, y_with_outliers)
+# Giảm chiều dữ liệu bằng PCA cho biểu đồ 3D
+pca = PCA(n_components=2)
+X_train_pca = pca.fit_transform(X_train_scaled)
+X_test_pca = pca.transform(X_test_scaled)
 
-# Huấn luyện Huber Regression
-huber = HuberRegressor()
-huber.fit(X_scaled, y_with_outliers)
+# ─── Phần 2: 3D Visualization (GaltonFamilies Dataset without Outliers) ────────
 
-# Đánh giá mô hình với outliers
-y_lr_pred_with_outliers = lr.predict(X_scaled)
-y_huber_pred_with_outliers = huber.predict(X_scaled)
-mse_lr_with_outliers = mean_squared_error(y_with_outliers, y_lr_pred_with_outliers)
-r2_lr_with_outliers = r2_score(y_with_outliers, y_lr_pred_with_outliers)
-mse_huber_with_outliers = mean_squared_error(y_with_outliers, y_huber_pred_with_outliers)
-r2_huber_with_outliers = r2_score(y_with_outliers, y_huber_pred_with_outliers)
-
-# Tạo lưới cho mặt phẳng hồi quy
-x1_range = np.linspace(X_scaled[:, 0].min(), X_scaled[:, 0].max(), 20)
-x2_range = np.linspace(X_scaled[:, 1].min(), X_scaled[:, 1].max(), 20)
-x1_grid, x2_grid = np.meshgrid(x1_range, x2_range)
-X_grid = np.c_[x1_grid.ravel(), x2_grid.ravel()]
-
-# Dự đoán cho Linear Regression
-y_lr_pred = lr.predict(X_grid)
-y_lr_grid = y_lr_pred.reshape(x1_grid.shape)
-
-# Dự đoán cho Huber Regression
-y_huber_pred = huber.predict(X_grid)
-y_huber_grid = y_huber_pred.reshape(x1_grid.shape)
-
-# Tạo biểu đồ 3D tương tác với Plotly
-fig_3d_with_outliers = go.Figure()
-
-# Vẽ điểm dữ liệu
-fig_3d_with_outliers.add_trace(go.Scatter3d(
-    x=X_scaled[:, 0],
-    y=X_scaled[:, 1],
-    z=y_with_outliers,
-    mode='markers',
-    marker=dict(size=5, color='blue', opacity=0.5),
-    name='Dữ liệu (không có outliers)'
-))
-
-# Vẽ mặt phẳng Linear Regression
-fig_3d_with_outliers.add_trace(go.Surface(
-    x=x1_grid,
-    y=x2_grid,
-    z=y_lr_grid,
-    colorscale='Reds',
-    opacity=0.4,
-    name='Linear Regression',
-    showscale=False
-))
-
-# Vẽ mặt phẳng Huber Regression
-fig_3d_with_outliers.add_trace(go.Surface(
-    x=x1_grid,
-    y=x2_grid,
-    z=y_huber_grid,
-    colorscale='Greens',
-    opacity=0.4,
-    name='Huber Regression',
-    showscale=False
-))
-
-# Thiết lập layout
-fig_3d_with_outliers.update_layout(
-    title='Linear vs Huber Regression trong Không Gian 3D (Không Có Outliers)',
-    scene=dict(
-        xaxis_title='Father Height (chuẩn hóa)',
-        yaxis_title='Mother Height (chuẩn hóa)',
-        zaxis_title='Child Height',
-    ),
-    legend=dict(x=0.1, y=0.9),
-    margin=dict(l=0, r=0, b=0, t=40),
-    width=1000,
-    height=600
-)
-
-# ─── Phần 2: 3D Visualization (GaltonFamilies Dataset with Outliers) ────────
-
-# Thêm outliers
-np.random.seed(42)
-outlier_indices = np.random.choice(len(y), 100, replace=False)  # 100 outliers
-y_with_outliers_100 = y.copy()
-y_with_outliers_100[outlier_indices] += np.random.uniform(-200, -180, 100)  # Outliers từ -200 đến -180 inches
+# Không thêm outliers vào tập train
+y_train_no_outliers = y_train.copy()
 
 # Huấn luyện Linear Regression
 lr_no_outliers = LinearRegression()
-lr_no_outliers.fit(X_scaled, y_with_outliers_100)
+lr_no_outliers.fit(X_train_scaled, y_train_no_outliers)
+lr_no_outliers_pred_train = lr_no_outliers.predict(X_train_scaled)
+lr_no_outliers_pred_test = lr_no_outliers.predict(X_test_scaled)
+lr_no_outliers_mse_train = mean_squared_error(y_train_no_outliers, lr_no_outliers_pred_train)
+lr_no_outliers_mse_test = mean_squared_error(y_test, lr_no_outliers_pred_test)
 
-# Huấn luyện Huber Regression
-huber_no_outliers = HuberRegressor()
-huber_no_outliers.fit(X_scaled, y_with_outliers_100)
+# Huấn luyện Huber Regression với epsilon nhỏ hơn
+huber_no_outliers = HuberRegressor(epsilon=1.1)
+huber_no_outliers.fit(X_train_scaled, y_train_no_outliers)
+huber_no_outliers_pred_train = huber_no_outliers.predict(X_train_scaled)
+huber_no_outliers_pred_test = huber_no_outliers.predict(X_test_scaled)
+huber_no_outliers_mse_train = mean_squared_error(y_train_no_outliers, huber_no_outliers_pred_train)
+huber_no_outliers_mse_test = mean_squared_error(y_test, huber_no_outliers_pred_test)
 
-# Đánh giá mô hình không có outliers
-y_lr_pred_no_outliers = lr_no_outliers.predict(X_scaled)
-y_huber_pred_no_outliers = huber_no_outliers.predict(X_scaled)
-mse_lr_no_outliers = mean_squared_error(y_with_outliers_100, y_lr_pred_no_outliers)
-r2_lr_no_outliers = r2_score(y_with_outliers_100, y_lr_pred_no_outliers)
-mse_huber_no_outliers = mean_squared_error(y_with_outliers_100, y_huber_pred_no_outliers)
-r2_huber_no_outliers = r2_score(y_with_outliers_100, y_huber_pred_no_outliers)
+# Tạo lưới cho mặt phẳng hồi quy (dựa trên PCA components)
+x1_range = np.linspace(X_train_pca[:, 0].min(), X_train_pca[:, 0].max(), 20)
+x2_range = np.linspace(X_train_pca[:, 1].min(), X_train_pca[:, 1].max(), 20)
+x1_grid, x2_grid = np.meshgrid(x1_range, x2_range)
+X_grid_pca = np.c_[x1_grid.ravel(), x2_grid.ravel()]
 
-# Dự đoán cho Linear Regression
-y_lr_pred_no_outliers = lr_no_outliers.predict(X_grid)
+# Chuyển ngược PCA grid về không gian gốc để dự đoán
+X_grid_scaled = pca.inverse_transform(X_grid_pca)
+y_lr_pred_no_outliers = lr_no_outliers.predict(X_grid_scaled)
 y_lr_grid_no_outliers = y_lr_pred_no_outliers.reshape(x1_grid.shape)
-
-# Dự đoán cho Huber Regression
-y_huber_pred_no_outliers = huber_no_outliers.predict(X_grid)
+y_huber_pred_no_outliers = huber_no_outliers.predict(X_grid_scaled)
 y_huber_grid_no_outliers = y_huber_pred_no_outliers.reshape(x1_grid.shape)
 
-# Tạo biểu đồ 3D tương tác với Plotly
+# Tạo biểu đồ 3D không có outliers
 fig_3d_no_outliers = go.Figure()
 
-# Vẽ điểm dữ liệu
+# Vẽ điểm dữ liệu (train và test)
 fig_3d_no_outliers.add_trace(go.Scatter3d(
-    x=X_scaled[:, 0],
-    y=X_scaled[:, 1],
-    z=y_with_outliers_100,
+    x=X_train_pca[:, 0],
+    y=X_train_pca[:, 1],
+    z=y_train_no_outliers,
     mode='markers',
     marker=dict(size=5, color='blue', opacity=0.5),
-    name='Dữ liệu (có outliers)'
+    name='Dữ liệu Train (không có outliers)'
+))
+fig_3d_no_outliers.add_trace(go.Scatter3d(
+    x=X_test_pca[:, 0],
+    y=X_test_pca[:, 1],
+    z=y_test,
+    mode='markers',
+    marker=dict(size=5, color='orange', opacity=0.5),
+    name='Dữ liệu Test'
 ))
 
 # Vẽ mặt phẳng Linear Regression
@@ -187,10 +133,10 @@ fig_3d_no_outliers.add_trace(go.Surface(
 
 # Thiết lập layout
 fig_3d_no_outliers.update_layout(
-    title='Linear vs Huber Regression trong Không Gian 3D (Có Outliers)',
+    title='Linear vs Huber Regression trong Không Gian 3D (Không Có Outliers, PCA)',
     scene=dict(
-        xaxis_title='Father Height (chuẩn hóa)',
-        yaxis_title='Mother Height (chuẩn hóa)',
+        xaxis_title='PCA Component 1',
+        yaxis_title='PCA Component 2',
         zaxis_title='Child Height',
     ),
     legend=dict(x=0.1, y=0.9),
@@ -199,7 +145,96 @@ fig_3d_no_outliers.update_layout(
     height=600
 )
 
-# ─── Phần 3: 2D Interactive Plot ──────────────────────────────────────────────
+# ─── Phần 3: 3D Visualization (GaltonFamilies Dataset with Outliers) ───────────
+
+# Thêm outliers nhân tạo vào tập train
+np.random.seed(42)
+outlier_indices = np.random.choice(len(y_train), int(0.2 * len(y_train)), replace=False)  # 20% train là outliers
+y_train_with_outliers = y_train.copy()
+y_train_with_outliers[outlier_indices] += np.random.uniform(20, 40, len(outlier_indices))  # Outliers từ 20 đến 40 inches
+
+# Huấn luyện Linear Regression
+lr = LinearRegression()
+lr.fit(X_train_scaled, y_train_with_outliers)
+lr_pred_train = lr.predict(X_train_scaled)
+lr_pred_test = lr.predict(X_test_scaled)
+lr_mse_train = mean_squared_error(y_train_with_outliers, lr_pred_train)
+lr_mse_test = mean_squared_error(y_test, lr_pred_test)
+
+# Huấn luyện Huber Regression với epsilon nhỏ hơn
+huber = HuberRegressor(epsilon=1.1)
+huber.fit(X_train_scaled, y_train_with_outliers)
+huber_pred_train = huber.predict(X_train_scaled)
+huber_pred_test = huber.predict(X_test_scaled)
+huber_mse_train = mean_squared_error(y_train_with_outliers, huber_pred_train)
+huber_mse_test = mean_squared_error(y_test, huber_pred_test)
+
+# Dự đoán cho Linear Regression
+y_lr_pred = lr.predict(X_grid_scaled)
+y_lr_grid = y_lr_pred.reshape(x1_grid.shape)
+
+# Dự đoán cho Huber Regression
+y_huber_pred = huber.predict(X_grid_scaled)
+y_huber_grid = y_huber_pred.reshape(x1_grid.shape)
+
+# Tạo biểu đồ 3D với outliers
+fig_3d_with_outliers = go.Figure()
+
+# Vẽ điểm dữ liệu (train và test)
+fig_3d_with_outliers.add_trace(go.Scatter3d(
+    x=X_train_pca[:, 0],
+    y=X_train_pca[:, 1],
+    z=y_train_with_outliers,
+    mode='markers',
+    marker=dict(size=5, color='blue', opacity=0.5),
+    name='Dữ liệu Train (có outliers)'
+))
+fig_3d_with_outliers.add_trace(go.Scatter3d(
+    x=X_test_pca[:, 0],
+    y=X_test_pca[:, 1],
+    z=y_test,
+    mode='markers',
+    marker=dict(size=5, color='orange', opacity=0.5),
+    name='Dữ liệu Test'
+))
+
+# Vẽ mặt phẳng Linear Regression
+fig_3d_with_outliers.add_trace(go.Surface(
+    x=x1_grid,
+    y=x2_grid,
+    z=y_lr_grid,
+    colorscale='Reds',
+    opacity=0.4,
+    name='Linear Regression',
+    showscale=False
+))
+
+# Vẽ mặt phẳng Huber Regression
+fig_3d_with_outliers.add_trace(go.Surface(
+    x=x1_grid,
+    y=x2_grid,
+    z=y_huber_grid,
+    colorscale='Greens',
+    opacity=0.4,
+    name='Huber Regression',
+    showscale=False
+))
+
+# Thiết lập layout
+fig_3d_with_outliers.update_layout(
+    title='Linear vs Huber Regression trong Không Gian 3D (Có Outliers, PCA)',
+    scene=dict(
+        xaxis_title='PCA Component 1',
+        yaxis_title='PCA Component 2',
+        zaxis_title='Child Height',
+    ),
+    legend=dict(x=0.1, y=0.9),
+    margin=dict(l=0, r=0, b=0, t=40),
+    width=1000,
+    height=600
+)
+
+# ─── Phần 4: 2D Interactive Plot ──────────────────────────────────────────────
 
 # Khởi tạo dữ liệu cho biểu đồ 2D
 np.random.seed(42)
@@ -214,8 +249,12 @@ def fit_models(data):
     X = data[:, 0].reshape(-1, 1)
     y = data[:, 1]
     lin = LinearRegression().fit(X, y)
-    huber = HuberRegressor().fit(X, y)
-    return lin, huber
+    huber = HuberRegressor(epsilon=1.1).fit(X, y)
+    lin_pred = lin.predict(X)
+    huber_pred = huber.predict(X)
+    lin_mse = mean_squared_error(y, lin_pred)
+    huber_mse = mean_squared_error(y, huber_pred)
+    return lin, huber, lin_mse, huber_mse
 
 # Hàm vẽ biểu đồ 2D
 def make_plot(data, lin, huber):
@@ -240,22 +279,36 @@ def make_plot(data, lin, huber):
 st.title("So sánh Linear Regression và Huber Regression")
 
 # Hiển thị biểu đồ 3D không có outliers
-st.subheader("Biểu đồ 3D: Dự đoán chiều cao con dựa trên chiều cao bố mẹ (Không Có Outliers)")
-st.write("Biểu đồ này sử dụng dataset GaltonFamilies không có outliers để so sánh Linear và Huber Regression.")
-st.plotly_chart(fig_3d_with_outliers, use_container_width=True)
-
-# Hiển thị hệ số và đánh giá mô hình không có outliers
-st.write(f"**Linear Regression Evaluation (Không Có Outliers):** MSE={mse_lr_with_outliers:.2f}, R²={r2_lr_with_outliers:.2f}")
-st.write(f"**Huber Regression Evaluation (Không Có Outliers):** MSE={mse_huber_with_outliers:.2f}, R²={r2_huber_with_outliers:.2f}")
-
-# Hiển thị biểu đồ 3D có outliers
-st.subheader("Biểu đồ 3D: Dự đoán chiều cao con dựa trên chiều cao bố mẹ (Có Outliers)")
-st.write("Biểu đồ này sử dụng dataset GaltonFamilies với 100 outliers nhân tạo để so sánh Linear và Huber Regression.")
+st.subheader("Biểu đồ 3D: Dự đoán chiều cao con (Không Có Outliers)")
+st.write(f"Sử dụng các thuộc tính {', '.join(features)} từ dataset GaltonFamilies, giảm chiều bằng PCA. "
+         f"Không có outliers trong tập train. Tập test không có outliers.")
 st.plotly_chart(fig_3d_no_outliers, use_container_width=True)
 
-# Hiển thị hệ số và đánh giá mô hình có outliers
-st.write(f"**Linear Regression Evaluation (Có Outliers):** MSE={mse_lr_no_outliers:.2f}, R²={r2_lr_no_outliers:.2f}")
-st.write(f"**Huber Regression Evaluation (Có Outliers):** MSE={mse_huber_no_outliers:.2f}, R²={r2_huber_no_outliers:.2f}")
+# Hiển thị metrics mô hình 3D không có outliers
+st.write("**Linear Regression (Không Có Outliers):**")
+# st.write(f"Intercept: {lr_no_outliers.intercept_:.2f}")
+st.write(f"Train MSE: {lr_no_outliers_mse_train:.2f}")
+st.write(f"Test MSE: {lr_no_outliers_mse_test:.2f}")
+st.write("**Huber Regression (Không Có Outliers):**")
+# st.write(f"Intercept: {huber_no_outliers.intercept_:.2f}")
+st.write(f"Train MSE: {huber_no_outliers_mse_train:.2f}")
+st.write(f"Test MSE: {huber_no_outliers_mse_test:.2f}")
+
+# Hiển thị biểu đồ 3D với outliers
+st.subheader("Biểu đồ 3D: Dự đoán chiều cao con (Có Outliers)")
+st.write(f"Sử dụng các thuộc tính {', '.join(features)} từ dataset GaltonFamilies, giảm chiều bằng PCA. "
+         f"Tập train có {len(outlier_indices)} outliers (20-40 inches). Tập test không có outliers.")
+st.plotly_chart(fig_3d_with_outliers, use_container_width=True)
+
+# Hiển thị metrics mô hình 3D với outliers
+st.write("**Linear Regression (Có Outliers):**")
+# st.write(f"Intercept: {lr.intercept_:.2f}")
+st.write(f"Train MSE: {lr_mse_train:.2f}")
+st.write(f"Test MSE: {lr_mse_test:.2f}")
+st.write("**Huber Regression (Có Outliers):**")
+# st.write(f"Intercept: {huber.intercept_:.2f}")
+st.write(f"Train MSE: {huber_mse_train:.2f}")
+st.write(f"Test MSE: {huber_mse_test:.2f}")
 
 # Hiển thị biểu đồ 2D
 st.subheader("Biểu đồ 2D: So sánh Linear và Huber Regression với dữ liệu tùy chỉnh")
@@ -264,11 +317,19 @@ st.write(
     "mạnh mẽ hơn. Thêm điểm mới để xem sự khác biệt!"
 )
 
-lin_model, huber_model = fit_models(st.session_state.data)
+lin_model, huber_model, lin_mse_2d, huber_mse_2d = fit_models(st.session_state.data)
 st.plotly_chart(
     make_plot(st.session_state.data, lin_model, huber_model),
     use_container_width=True
 )
+
+# Hiển thị metrics mô hình 2D
+st.write("**Linear Regression (2D):**")
+# st.write(f"Intercept: {lin_model.intercept_:.2f}")
+st.write(f"MSE: {lin_mse_2d:.2f}")
+st.write("**Huber Regression (2D):**")
+# st.write(f"Intercept: {huber_model.intercept_:.2f}")
+st.write(f"MSE: {huber_mse_2d:.2f}")
 
 # Thêm điểm ngoại lệ
 st.subheader("Thêm điểm ngoại lệ")
